@@ -1,6 +1,7 @@
 ---
 name: code-review-assistant
 description: Comprehensive code review assistant that analyzes code for security vulnerabilities, performance issues, and code quality. Use when reviewing pull requests, conducting code audits, or analyzing code changes. Supports Python, JavaScript/TypeScript, and general code patterns. Includes automated analysis scripts and structured checklists.
+allowed-tools: Read, Grep, Glob, Bash
 ---
 
 # Code Review Assistant
