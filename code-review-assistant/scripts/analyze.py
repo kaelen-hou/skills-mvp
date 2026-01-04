@@ -11,6 +11,7 @@ Usage:
 Examples:
     python analyze.py src/main.py
     python analyze.py ./src --recursive --output json
+    python analyze.py src/ --verbose
 """
 
 import argparse
@@ -46,6 +47,16 @@ class FileMetrics:
     total_complexity: int
 
 
+@dataclass
+class AnalyzeConfig:
+    """Configuration for code analysis."""
+    path: Path
+    output_format: str
+    recursive: bool
+    exclude_patterns: List[str]
+    verbose: bool
+
+
 # Complexity estimation patterns
 COMPLEXITY_PATTERNS = [
     re.compile(r'\bif\b'),
@@ -61,6 +72,22 @@ COMPLEXITY_PATTERNS = [
     re.compile(r'\|\|'),
     re.compile(r'&&'),
 ]
+
+# JS/TS function patterns (including arrow functions)
+JS_FUNCTION_PATTERNS = [
+    re.compile(r'^\s*(?:async\s+)?function\s+(\w+)'),
+    re.compile(r'^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>'),
+    re.compile(r'^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\w+\s*=>'),
+    re.compile(r'^\s*(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\('),
+    re.compile(r'^\s*(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?function'),
+    re.compile(r'^\s*(\w+)\s*\([^)]*\)\s*(?::\s*\w+)?\s*\{'),
+]
+
+
+def log_verbose(message: str, verbose: bool) -> None:
+    """Print message if verbose mode is enabled."""
+    if verbose:
+        print(f"[DEBUG] {message}", file=sys.stderr)
 
 
 def estimate_complexity(code: str) -> int:
@@ -84,7 +111,7 @@ def find_python_function_end(lines: List[str], start_idx: int, indent: int) -> i
     return end_line
 
 
-def extract_functions_python(content: str) -> List[FunctionMetrics]:
+def extract_functions_python(content: str, verbose: bool = False) -> List[FunctionMetrics]:
     """Extract function metrics from Python code."""
     functions = []
     lines = content.split('\n')
@@ -100,6 +127,7 @@ def extract_functions_python(content: str) -> List[FunctionMetrics]:
             end_line = find_python_function_end(lines, i, indent)
 
             func_content = '\n'.join(lines[i:end_line])
+            log_verbose(f"  Found Python function: {name} (lines {start_line}-{end_line})", verbose)
             functions.append(FunctionMetrics(
                 name=name,
                 start_line=start_line,
@@ -119,6 +147,10 @@ def find_js_function_end(lines: List[str], start_idx: int) -> int:
     brace_count = lines[start_idx].count('{') - lines[start_idx].count('}')
     end_line = start_idx + 1
 
+    # Handle arrow functions without braces (single expression)
+    if brace_count == 0 and '=>' in lines[start_idx]:
+        return end_line
+
     for j in range(start_idx + 1, len(lines)):
         brace_count += lines[j].count('{') - lines[j].count('}')
         end_line = j + 1
@@ -128,16 +160,7 @@ def find_js_function_end(lines: List[str], start_idx: int) -> int:
     return end_line
 
 
-# JS/TS function patterns
-JS_FUNCTION_PATTERNS = [
-    re.compile(r'^\s*(?:async\s+)?function\s+(\w+)'),
-    re.compile(r'^\s*(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\('),
-    re.compile(r'^\s*(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?function'),
-    re.compile(r'^\s*(\w+)\s*\([^)]*\)\s*(?::\s*\w+)?\s*\{'),
-]
-
-
-def extract_functions_js(content: str) -> List[FunctionMetrics]:
+def extract_functions_js(content: str, verbose: bool = False) -> List[FunctionMetrics]:
     """Extract function metrics from JavaScript/TypeScript code."""
     functions = []
     lines = content.split('\n')
@@ -156,6 +179,7 @@ def extract_functions_js(content: str) -> List[FunctionMetrics]:
             end_line = find_js_function_end(lines, i)
 
             func_content = '\n'.join(lines[i:end_line])
+            log_verbose(f"  Found JS/TS function: {name} (lines {start_line}-{end_line})", verbose)
             functions.append(FunctionMetrics(
                 name=name,
                 start_line=start_line,
@@ -170,7 +194,7 @@ def extract_functions_js(content: str) -> List[FunctionMetrics]:
     return functions
 
 
-def analyze_file(file_path: Path) -> Optional[FileMetrics]:
+def analyze_file(file_path: Path, verbose: bool = False) -> Optional[FileMetrics]:
     """Analyze a single source file."""
     try:
         content = file_path.read_text(encoding='utf-8')
@@ -179,12 +203,13 @@ def analyze_file(file_path: Path) -> Optional[FileMetrics]:
         return None
 
     line_counts = count_lines(content)
+    log_verbose(f"Analyzing {file_path} ({line_counts['total']} lines)", verbose)
 
     suffix = file_path.suffix.lower()
     if suffix == '.py':
-        functions = extract_functions_python(content)
+        functions = extract_functions_python(content, verbose)
     elif suffix in ['.js', '.ts', '.jsx', '.tsx']:
-        functions = extract_functions_js(content)
+        functions = extract_functions_js(content, verbose)
     else:
         functions = []
 
@@ -264,7 +289,8 @@ def format_text_output(metrics: List[FileMetrics]) -> str:
     return '\n'.join(output)
 
 
-def main():
+def parse_args() -> AnalyzeConfig:
+    """Parse command line arguments and return configuration."""
     parser = argparse.ArgumentParser(
         description='Analyze code metrics for source files'
     )
@@ -275,36 +301,66 @@ def main():
                        help='Recursively analyze directories')
     parser.add_argument('--exclude', '-e', action='append', default=[],
                        help='Glob patterns to exclude (can be used multiple times)')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                       help='Enable verbose output for debugging')
 
     args = parser.parse_args()
 
-    path = Path(args.path)
-    if not path.exists():
-        print(f"Error: Path does not exist: {path}", file=sys.stderr)
-        sys.exit(1)
+    return AnalyzeConfig(
+        path=Path(args.path),
+        output_format=args.output,
+        recursive=args.recursive,
+        exclude_patterns=args.exclude,
+        verbose=args.verbose
+    )
+
+
+def collect_metrics(config: AnalyzeConfig) -> Optional[List[FileMetrics]]:
+    """Collect metrics from all source files."""
+    if not config.path.exists():
+        print(f"Error: Path does not exist: {config.path}", file=sys.stderr)
+        return None
 
     files = get_source_files(
-        path,
+        config.path,
         extensions=SOURCE_EXTENSIONS,
-        recursive=args.recursive,
-        exclude_patterns=args.exclude
+        recursive=config.recursive,
+        exclude_patterns=config.exclude_patterns
     )
 
     if not files:
-        print(f"No source files found in: {path}", file=sys.stderr)
-        sys.exit(1)
+        print(f"No source files found in: {config.path}", file=sys.stderr)
+        return None
+
+    log_verbose(f"Found {len(files)} files to analyze", config.verbose)
 
     metrics = []
     for file_path in files:
-        result = analyze_file(file_path)
+        result = analyze_file(file_path, config.verbose)
         if result:
             metrics.append(result)
 
-    if args.output == 'json':
+    return metrics
+
+
+def output_results(metrics: List[FileMetrics], config: AnalyzeConfig) -> None:
+    """Output analysis results."""
+    if config.output_format == 'json':
         data = [asdict(m) for m in metrics]
         print(json.dumps(data, indent=2))
     else:
         print(format_text_output(metrics))
+
+
+def main():
+    """Main entry point."""
+    config = parse_args()
+    metrics = collect_metrics(config)
+
+    if metrics is None:
+        sys.exit(1)
+
+    output_results(metrics, config)
 
 
 if __name__ == '__main__':

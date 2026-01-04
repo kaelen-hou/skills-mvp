@@ -12,6 +12,7 @@ Examples:
     python security_scan.py src/
     python security_scan.py app.py --severity high
     python security_scan.py src/ --exclude '*_test.py'
+    python security_scan.py src/ --verbose
 """
 
 import argparse
@@ -20,7 +21,7 @@ import re
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Optional
 
 from utils import get_source_files, SOURCE_EXTENSIONS, WEB_EXTENSIONS
 
@@ -35,6 +36,17 @@ class SecurityFinding:
     code: str
     description: str
     recommendation: str
+
+
+@dataclass
+class ScanConfig:
+    """Configuration for security scanning."""
+    path: Path
+    severity_filter: str
+    output_format: str
+    exclude_patterns: List[str]
+    skip_self: bool
+    verbose: bool
 
 
 # Severity levels for filtering
@@ -136,9 +148,14 @@ SECURITY_PATTERNS = [
 ]
 
 
+def log_verbose(message: str, verbose: bool) -> None:
+    """Print message if verbose mode is enabled."""
+    if verbose:
+        print(f"[DEBUG] {message}", file=sys.stderr)
+
+
 def is_pattern_definition_line(line: str) -> bool:
     """Check if line is defining a pattern (to avoid self-detection)."""
-    # Skip lines that are regex pattern definitions or comments
     pattern_indicators = [
         "r'\\b",       # Raw string regex start
         'r"\\b',       # Raw string regex start
@@ -159,16 +176,10 @@ def is_pattern_definition_line(line: str) -> bool:
 def scan_file(
     file_path: Path,
     severity_filter: str = 'all',
-    skip_self: bool = True
+    skip_self: bool = True,
+    verbose: bool = False
 ) -> List[SecurityFinding]:
-    """
-    Scan a single file for security patterns.
-
-    Args:
-        file_path: Path to file to scan
-        severity_filter: Minimum severity level to report
-        skip_self: Skip pattern definition lines (avoid false positives)
-    """
+    """Scan a single file for security patterns."""
     findings = []
 
     try:
@@ -177,6 +188,8 @@ def scan_file(
     except Exception as e:
         print(f"Warning: Could not read {file_path}: {e}", file=sys.stderr)
         return findings
+
+    log_verbose(f"Scanning {file_path} ({len(lines)} lines)", verbose)
 
     min_severity = SEVERITY_LEVELS.get(severity_filter, 0)
 
@@ -190,11 +203,11 @@ def scan_file(
             regex = re.compile(pattern_regex, re.IGNORECASE)
 
             for line_num, line in enumerate(lines, 1):
-                # Skip pattern definition lines to avoid false positives
                 if skip_self and is_pattern_definition_line(line):
                     continue
 
                 if regex.search(line):
+                    log_verbose(f"  Found: {pattern_name} at line {line_num}", verbose)
                     findings.append(SecurityFinding(
                         file=str(file_path),
                         line=line_num,
@@ -256,7 +269,8 @@ def format_text_output(findings: List[SecurityFinding]) -> str:
     return '\n'.join(output)
 
 
-def main():
+def parse_args() -> ScanConfig:
+    """Parse command line arguments and return configuration."""
     parser = argparse.ArgumentParser(
         description='Scan code for security vulnerability patterns'
     )
@@ -269,34 +283,49 @@ def main():
                        help='Glob patterns to exclude (can be used multiple times)')
     parser.add_argument('--no-skip-self', action='store_true',
                        help='Do not skip pattern definition lines')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                       help='Enable verbose output for debugging')
 
     args = parser.parse_args()
 
-    path = Path(args.path)
-    if not path.exists():
-        print(f"Error: Path does not exist: {path}", file=sys.stderr)
-        sys.exit(1)
+    return ScanConfig(
+        path=Path(args.path),
+        severity_filter=args.severity,
+        output_format=args.output,
+        exclude_patterns=args.exclude,
+        skip_self=not args.no_skip_self,
+        verbose=args.verbose
+    )
 
-    # Combine source and web extensions for security scanning
+
+def collect_findings(config: ScanConfig) -> Optional[List[SecurityFinding]]:
+    """Collect all security findings from files."""
+    if not config.path.exists():
+        print(f"Error: Path does not exist: {config.path}", file=sys.stderr)
+        return None
+
     all_extensions: Set[str] = SOURCE_EXTENSIONS | WEB_EXTENSIONS
 
     files = get_source_files(
-        path,
+        config.path,
         extensions=all_extensions,
         recursive=True,
-        exclude_patterns=args.exclude
+        exclude_patterns=config.exclude_patterns
     )
 
     if not files:
-        print(f"No source files found in: {path}", file=sys.stderr)
-        sys.exit(1)
+        print(f"No source files found in: {config.path}", file=sys.stderr)
+        return None
+
+    log_verbose(f"Found {len(files)} files to scan", config.verbose)
 
     all_findings = []
     for file_path in files:
         findings = scan_file(
             file_path,
-            args.severity,
-            skip_self=not args.no_skip_self
+            config.severity_filter,
+            skip_self=config.skip_self,
+            verbose=config.verbose
         )
         all_findings.extend(findings)
 
@@ -304,16 +333,32 @@ def main():
     severity_order = {'high': 0, 'medium': 1, 'low': 2}
     all_findings.sort(key=lambda f: (severity_order[f.severity], f.file, f.line))
 
-    if args.output == 'json':
-        data = [asdict(f) for f in all_findings]
+    return all_findings
+
+
+def output_results(findings: List[SecurityFinding], config: ScanConfig) -> int:
+    """Output results and return exit code."""
+    if config.output_format == 'json':
+        data = [asdict(f) for f in findings]
         print(json.dumps(data, indent=2))
     else:
-        print(format_text_output(all_findings))
+        print(format_text_output(findings))
 
-    # Exit with error code if high severity issues found
-    high_count = sum(1 for f in all_findings if f.severity == 'high')
-    if high_count > 0:
+    # Return error code if high severity issues found
+    high_count = sum(1 for f in findings if f.severity == 'high')
+    return 1 if high_count > 0 else 0
+
+
+def main():
+    """Main entry point."""
+    config = parse_args()
+    findings = collect_findings(config)
+
+    if findings is None:
         sys.exit(1)
+
+    exit_code = output_results(findings, config)
+    sys.exit(exit_code)
 
 
 if __name__ == '__main__':
