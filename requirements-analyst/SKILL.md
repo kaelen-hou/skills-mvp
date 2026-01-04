@@ -1,12 +1,12 @@
 ---
 name: requirements-analyst
-description: 需求分析助手，将模糊需求转换为结构化用户故事。用于处理非正式功能请求、头脑风暴输出或不清晰的产品需求。通过针对性提问澄清歧义，输出标准用户故事格式和验收标准。
+description: 需求分析助手，将模糊需求转换为结构化文档。支持两种输出格式：用户故事（User Story）适合敏捷开发，PRD（产品需求文档）适合完整功能规划。通过针对性提问澄清歧义。
 allowed-tools: Read, AskUserQuestion
 ---
 
 # Requirements Analyst
 
-将模糊需求转换为清晰、可执行的用户故事。
+将模糊需求转换为清晰、可执行的需求文档。
 
 ## 如何使用
 
@@ -23,15 +23,16 @@ allowed-tools: Read, AskUserQuestion
 ```
 
 ```
-我们想做一个消息通知系统
+写一份用户系统的 PRD
 ```
 
 ### 使用流程
 
 1. **描述需求** - 用自然语言描述你想要的功能（可以模糊、不完整）
-2. **回答问题** - 助手会提出澄清问题，选择或输入你的答案
-3. **获取用户故事** - 助手输出结构化的用户故事和验收标准
-4. **确认调整** - 根据需要要求修改或补充
+2. **选择格式** - 助手会询问输出格式（用户故事 / PRD）
+3. **回答问题** - 助手会提出澄清问题，选择或输入你的答案
+4. **获取文档** - 助手输出结构化的需求文档
+5. **确认调整** - 根据需要要求修改或补充
 
 ### 示例对话
 
@@ -39,6 +40,7 @@ allowed-tools: Read, AskUserQuestion
 > 我需要一个购物车功能
 
 **助手响应：**
+
 1. 识别缺失信息（用户类型、功能范围、边界条件）
 2. 提出澄清问题：
    - 购物车是否支持游客使用？
@@ -79,13 +81,17 @@ allowed-tools: Read, AskUserQuestion
 3. **验收细节** - 如何验证功能完成
 
 提问原则：
+
 - 批量提问 (3-5 个问题一组)
 - 提供选项而非开放式问题
 - 说明如果不回答会采用的默认假设
 
 ### Phase 3: 生成阶段
 
-按照 [USER_STORY_TEMPLATE.md](references/USER_STORY_TEMPLATE.md) 生成结构化输出。
+根据选择的输出格式生成文档：
+
+- **用户故事**: 按照 [USER_STORY_TEMPLATE.md](references/USER_STORY_TEMPLATE.md) 生成
+- **PRD**: 按照 [PRD_TEMPLATE.md](references/PRD_TEMPLATE.md) 生成
 
 ### Phase 4: 确认阶段
 
@@ -104,6 +110,8 @@ allowed-tools: Read, AskUserQuestion
 
 ## 输出格式
 
+### 用户故事格式
+
 ```markdown
 ## User Story: [简短标题]
 
@@ -121,28 +129,83 @@ allowed-tools: Read, AskUserQuestion
 - [排除范围]
 ```
 
+### PRD 格式
+
+```markdown
+# [产品/功能名称] PRD
+
+## 1. 概述
+### 1.1 背景
+[为什么要做这个功能]
+### 1.2 目标
+[业务目标和用户目标]
+### 1.3 成功指标
+[如何衡量成功]
+
+## 2. 用户分析
+### 2.1 目标用户
+[用户画像]
+### 2.2 用户痛点
+[当前问题]
+### 2.3 用户场景
+[典型使用场景]
+
+## 3. 功能需求
+### 3.1 功能列表
+[功能清单和优先级]
+### 3.2 功能详情
+[每个功能的详细说明]
+### 3.3 用户故事
+[对应的用户故事]
+
+## 4. 非功能需求
+[性能/安全/兼容性要求]
+
+## 5. 数据需求
+[数据模型和流转]
+
+## 6. 开放问题
+[待决策事项]
+```
+
 ## 参考资料
 
 ### 用户故事模板
+
 **何时加载**: 生成用户故事时
 
 参见 [USER_STORY_TEMPLATE.md](references/USER_STORY_TEMPLATE.md):
+
 - 标准用户故事格式
 - INVEST 检查清单
 - 故事拆分策略
 
+### PRD 模板
+
+**何时加载**: 生成 PRD 文档时
+
+参见 [PRD_TEMPLATE.md](references/PRD_TEMPLATE.md):
+
+- 完整 PRD 结构
+- 各部分编写指南
+- PRD vs 用户故事对比
+
 ### 验收标准指南
+
 **何时加载**: 编写验收标准时
 
 参见 [ACCEPTANCE_CRITERIA.md](references/ACCEPTANCE_CRITERIA.md):
+
 - Given-When-Then 格式
 - 不同类型验收标准示例
 - 编写原则
 
 ### 提问策略
+
 **何时加载**: 需要向用户提问时
 
 参见 [CLARIFICATION_QUESTIONS.md](references/CLARIFICATION_QUESTIONS.md):
+
 - 何时提问 vs 何时假设
 - 按类别分类的问题库
 - 问题模板
